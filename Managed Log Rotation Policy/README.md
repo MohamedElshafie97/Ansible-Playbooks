@@ -19,3 +19,33 @@ logrotate-automation/
 ├── logrotate_management.yml   # Main Playbook
 ├── inventory/                 # Server Inventory
 └── README.md                  # Documentation
+
+
+🚀 How to Use
+Define your Variables:
+Update the vars section in the playbook to point to your application logs:
+
+
+vars:
+  log_path: "/var/log/myapp/*.log"
+  rotation_count: 7
+
+Run the Playbook:
+
+
+ansible-playbook -i inventory/hosts logrotate_management.yml
+Dry Run (Check for errors):
+
+
+ansible-playbook -i inventory/hosts logrotate_management.yml --check
+
+📄 Configuration Details
+The playbook enforces the following policy:
+
+Daily Rotation: Keeps logs fresh.
+
+Compression: Uses gzip to reduce log size by up to 90%.
+
+Retention: Maintains 7 days of history (customizable).
+
+Service Reload: Safely reloads rsyslog post-rotation to ensure logging continuity
