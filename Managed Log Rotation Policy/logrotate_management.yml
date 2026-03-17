@@ -1,0 +1,72 @@
+---
+- name: Managed Log Rotation Policy
+  hosts: all
+  become: yes
+  vars:
+    # Define your custom rotation settings here
+    log_path: "/var/log/myapp/*.log"
+    rotation_count: 7
+    rotation_interval: daily
+
+  tasks:
+    - name: Ensure logrotate is installed
+      package:
+        name: logrotate
+        state: present
+
+    - name: Ensure logrotate directory exists
+      file:
+        path: /etc/logrotate.d
+        state: directory
+        mode: '0755'
+
+    - name: Configure global logrotate settings
+      lineinfile:
+        path: /etc/logrotate.conf
+        regexp: '^#?compress'
+        line: 'compress'
+        state: present
+      comment: "Enable compression globally to save disk space"
+
+    - name: Deploy custom application logrotate policy
+      copy:
+        dest: /etc/logrotate.d/myapp
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          {{ log_path }} {
+              {{ rotation_interval }}
+              rotate {{ rotation_count }}
+              missingok
+              notifempty
+              compress
+              delaycompress
+              sharedscripts
+              postrotate
+                  # Handle service reload based on OS family
+                  {% if ansible_os_family == "Debian" %}
+                  /usr/bin/systemctl reload rsyslog > /dev/null 2>&1 || true
+                  {% else %}
+                  /usr/bin/systemctl reload rsyslog.service > /dev/null 2>&1 || true
+                  {% endif %}
+              endscript
+          }
+
+    - name: Test logrotate configuration syntax
+      command: logrotate -d /etc/logrotate.conf
+      register: logrotate_test
+      changed_when: false
+      failed_when: "'error' in logrotate_test.stderr"
+
+    - name: Manually force log rotation (Optional - First Run)
+      command: logrotate -f /etc/logrotate.d/myapp
+      args:
+        creates: "{{ log_path }}.1.gz"
+      when: force_rotate | default(false)
+
+  handlers:
+    - name: restart syslog
+      service:
+        name: "{{ 'rsyslog' if ansible_os_family == 'Debian' else 'rsyslog' }}"
+        state: restarted
