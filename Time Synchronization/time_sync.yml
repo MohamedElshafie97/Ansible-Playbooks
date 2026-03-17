@@ -1,0 +1,46 @@
+---
+- name: Enterprise Time Synchronization (Chrony)
+  hosts: all
+  become: yes
+  vars:
+    timezone: "Africa/Cairo"
+    ntp_servers:
+      - "0.pool.ntp.org"
+      - "1.pool.ntp.org"
+      - "2.pool.ntp.org"
+
+  tasks:
+    - name: Install Chrony package
+      package:
+        name: chrony
+        state: present
+
+    - name: Set system timezone
+      timezone:
+        name: "{{ timezone }}"
+
+    - name: Deploy Chrony configuration
+      template:
+        src: templates/chrony.conf.j2
+        dest: /etc/chrony.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Chrony
+
+    - name: Ensure Chrony is enabled and running
+      service:
+        name: "{{ 'chrony' if ansible_os_family == 'Debian' else 'chronyd' }}"
+        state: started
+        enabled: yes
+
+    - name: Verify synchronization status
+      command: chronyc tracking
+      register: chrony_status
+      changed_when: false
+
+  handlers:
+    - name: Restart Chrony
+      service:
+        name: "{{ 'chrony' if ansible_os_family == 'Debian' else 'chronyd' }}"
+        state: restarted
