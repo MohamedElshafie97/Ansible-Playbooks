@@ -18,12 +18,10 @@ This repository contains a production-grade Ansible playbook designed to harden 
 
 
 
-
 Execute Playbook:
 
 
 ansible-playbook -i inventory/hosts ssh_hardening.yml
-
 
 ⚠️ Important Note
 Before running this playbook: Ensure you have already copied your public SSH key to the target server for the user defined in allow_users. Failure to do so will result in being locked out of the server once password authentication is disabled.
