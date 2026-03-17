@@ -29,14 +29,15 @@ This repository provides an automated solution for standardizing system time and
 
    Run the Playbook:
 
+   ansible-playbook -i hosts time_sync.yml
 
-ansible-playbook -i hosts time_sync.yml
+   Verify Sync:
+   
+   chronyc tracking
 
-Verify Sync:
 The playbook will output the synchronization status. You can also run:
 
 
-chronyc tracking
 
 
 📄 Customization
@@ -46,3 +47,13 @@ You can modify the vars section in time_sync.yml to change the default timezone 
 vars:
   timezone: "Africa/Cairo"
   ntp_servers: ["0.pool.ntp.org", "1.pool.ntp.org"]
+
+
+
+
+
+   
+
+
+
+
