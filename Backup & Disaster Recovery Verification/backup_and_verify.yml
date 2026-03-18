@@ -1,0 +1,57 @@
+---
+- name: Critical Data Backup and Integrity Verification
+  hosts: all
+  become: yes
+  vars:
+    backup_dir: "/mnt/backups/{{ ansible_hostname }}"
+    timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+    db_name: "production_db" # Change to your DB name
+    config_paths:
+      - "/etc/nginx/nginx.conf"
+      - "/etc/mysql/my.cnf"
+      - "/etc/ssh/sshd_config"
+
+  tasks:
+    - name: Ensure backup directory exists
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0700'
+
+    - name: Backup Critical Configurations
+      archive:
+        path: "{{ config_paths }}"
+        dest: "{{ backup_dir }}/configs_{{ timestamp }}.tar.gz"
+        format: gz
+
+    - name: Perform MariaDB/MySQL Dump
+      mysql_db:
+        name: "{{ db_name }}"
+        state: dump
+        target: "{{ backup_dir }}/{{ db_name }}_{{ timestamp }}.sql"
+      when: ansible_facts['services']['mariadb.service'] is defined or ansible_facts['services']['mysql.service'] is defined
+
+    - name: Generate MD5 Checksum for Verification
+      stat:
+        path: "{{ backup_dir }}/configs_{{ timestamp }}.tar.gz"
+        checksum_algorithm: md5
+      register: backup_stat
+
+    - name: Log Backup Success and Integrity Hash
+      lineinfile:
+        path: "{{ backup_dir }}/backup_log.txt"
+        line: "BACKUP_SUCCESS | {{ timestamp }} | MD5: {{ backup_stat.stat.checksum }}"
+        create: yes
+
+    - name: Cleanup backups older than 7 days
+      find:
+        paths: "{{ backup_dir }}"
+        age: 7d
+        recurse: yes
+      register: old_backups
+
+    - name: Remove expired backup files
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_backups.files }}"
