@@ -1,0 +1,21 @@
+---
+ansible_user: ansible
+ansible_become: true
+
+ssh_port: 22
+ssh_allow_groups:
+  - sshusers
+
+admin_users:
+  - name: mohamed
+    comment: Mohamed Elshafie
+    groups: [sshusers]
+    sudo: true
+    pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIReplaceWithYourOwnKey mohamed@workstation"
+    state: present
+
+# Users to lock and remove on every run
+removed_users: []
+
+firewall_allowed_tcp_ports:
+  - "{{ ssh_port }}"

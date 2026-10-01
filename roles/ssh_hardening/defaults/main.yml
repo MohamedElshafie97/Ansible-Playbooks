@@ -1,0 +1,14 @@
+---
+ssh_port: 22
+ssh_permit_root_login: "no"
+ssh_password_authentication: "no"
+ssh_max_auth_tries: 3
+ssh_client_alive_interval: 300
+ssh_client_alive_count_max: 2
+ssh_login_grace_time: 30
+ssh_allow_groups: []
+ssh_banner_path: /etc/issue.net
+
+# Safety net: refuse to disable password auth if the connecting
+# user has no authorized_keys on the target.
+ssh_check_keys_before_disabling_passwords: true

@@ -1,0 +1,45 @@
+---
+- name: Install base packages
+  ansible.builtin.package:
+    name: "{{ common_packages + (common_packages_redhat if ansible_os_family == 'RedHat' else common_packages_debian) }}"
+    state: present
+
+- name: Apply kernel parameters
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/90-baseline.conf
+    reload: true
+  loop: "{{ common_sysctl | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Make journald storage persistent
+  ansible.builtin.file:
+    path: /var/log/journal
+    state: directory
+    owner: root
+    group: systemd-journal
+    mode: "2755"
+  notify: Restart journald
+
+- name: Cap journald disk usage
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/journald.conf
+    regexp: '^#?SystemMaxUse='
+    line: "SystemMaxUse={{ common_journald_max_use }}"
+  notify: Restart journald
+
+- name: Deploy login banner
+  ansible.builtin.template:
+    src: motd.j2
+    dest: /etc/motd
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable sysstat collection
+  ansible.builtin.service:
+    name: sysstat
+    state: started
+    enabled: true

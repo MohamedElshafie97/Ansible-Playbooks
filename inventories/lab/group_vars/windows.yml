@@ -1,0 +1,7 @@
+---
+ansible_connection: winrm
+ansible_winrm_transport: ntlm
+ansible_winrm_server_cert_validation: ignore
+ansible_port: 5986
+ansible_user: LAB\ansible-svc
+# ansible_password lives in vault: ansible-vault edit inventories/lab/group_vars/windows_vault.yml

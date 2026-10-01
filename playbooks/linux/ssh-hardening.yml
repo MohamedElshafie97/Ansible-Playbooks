@@ -1,0 +1,12 @@
+---
+# Hardens sshd with a drop-in file instead of editing sshd_config in place.
+# Refuses to disable password auth if the Ansible user has no key on the host.
+#
+#   ansible-playbook playbooks/linux/ssh-hardening.yml --check --diff
+#   ansible-playbook playbooks/linux/ssh-hardening.yml -e ssh_port=2222
+- name: SSH hardening
+  hosts: linux
+  become: true
+  serial: "25%"
+  roles:
+    - ssh_hardening

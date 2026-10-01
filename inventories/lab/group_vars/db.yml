@@ -1,0 +1,9 @@
+---
+mariadb_backup_user: backup
+# mariadb_backup_password: stored in vault
+mariadb_max_lag_seconds: 60
+
+backup_extra_paths:
+  - /etc/my.cnf
+  - /etc/my.cnf.d
+  - /etc/mysql

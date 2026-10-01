@@ -1,0 +1,37 @@
+---
+common_packages:
+  - vim
+  - curl
+  - wget
+  - git
+  - htop
+  - tmux
+  - rsync
+  - tar
+  - unzip
+  - lsof
+  - tcpdump
+  - bash-completion
+  - sysstat
+
+common_packages_redhat:
+  - bind-utils
+  - policycoreutils-python-utils
+
+common_packages_debian:
+  - dnsutils
+  - net-tools
+
+common_sysctl:
+  net.ipv4.tcp_syncookies: 1
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv4.conf.all.accept_source_route: 0
+  net.ipv4.conf.all.log_martians: 1
+  kernel.dmesg_restrict: 1
+  fs.suid_dumpable: 0
+  vm.swappiness: 10
+
+common_journald_max_use: 1G
+common_motd_banner: "Authorized access only. All activity is logged."

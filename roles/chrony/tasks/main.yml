@@ -1,0 +1,58 @@
+---
+- name: Set paths per distribution
+  ansible.builtin.set_fact:
+    chrony_conf_path: "{{ '/etc/chrony/chrony.conf' if ansible_os_family == 'Debian' else '/etc/chrony.conf' }}"
+    chrony_service: "{{ 'chrony' if ansible_os_family == 'Debian' else 'chronyd' }}"
+
+- name: Remove legacy ntpd if present
+  ansible.builtin.package:
+    name: ntp
+    state: absent
+
+- name: Install chrony
+  ansible.builtin.package:
+    name: chrony
+    state: present
+
+- name: Set timezone
+  community.general.timezone:
+    name: "{{ chrony_timezone }}"
+
+- name: Deploy chrony.conf
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: "{{ chrony_conf_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart chrony
+
+- name: Enable and start chrony
+  ansible.builtin.service:
+    name: "{{ chrony_service }}"
+    state: started
+    enabled: true
+
+- name: Apply config before verifying
+  ansible.builtin.meta: flush_handlers
+
+- name: Force an immediate step if the clock is far off
+  ansible.builtin.command: chronyc -a makestep
+  changed_when: false
+
+- name: Read tracking data
+  ansible.builtin.command: chronyc -c tracking
+  register: chrony_tracking
+  changed_when: false
+  retries: 6
+  delay: 10
+  # CSV fields: 0=ref id, 1=ref name, 2=stratum, 3=ref time, 4=system offset
+  # Stratum 0 means chrony has not selected a source yet.
+  until: (chrony_tracking.stdout.split(',')[2] | default('0') | int) > 0
+
+- name: Check offset is within limits
+  ansible.builtin.assert:
+    that:
+      - (chrony_tracking.stdout.split(',')[4] | float | abs) < chrony_max_offset
+    fail_msg: "Clock offset {{ chrony_tracking.stdout.split(',')[4] }}s exceeds {{ chrony_max_offset }}s"
+    success_msg: "Synced to {{ chrony_tracking.stdout.split(',')[1] }}, offset {{ chrony_tracking.stdout.split(',')[4] }}s"

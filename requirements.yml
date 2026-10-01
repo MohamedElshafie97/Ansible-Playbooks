@@ -1,0 +1,9 @@
+---
+collections:
+  - name: ansible.posix
+  - name: community.general
+  - name: community.mysql
+  - name: ansible.windows
+  - name: community.windows
+  - name: community.crypto
+  - name: chocolatey.chocolatey

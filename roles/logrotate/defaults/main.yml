@@ -1,0 +1,13 @@
+---
+# One entry per application. Each becomes /etc/logrotate.d/<name>
+logrotate_policies:
+  - name: myapp
+    paths:
+      - /var/log/myapp/*.log
+    frequency: daily
+    rotate: 14
+    maxsize: 200M
+    copytruncate: false
+    postrotate: "systemctl reload rsyslog >/dev/null 2>&1 || true"
+
+logrotate_compress_globally: true

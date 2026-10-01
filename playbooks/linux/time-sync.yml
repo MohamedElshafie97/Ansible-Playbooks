@@ -1,0 +1,8 @@
+---
+# Installs chrony, sets the timezone, and fails the run if a host
+# can't sync or its offset is above chrony_max_offset.
+- name: Time synchronization
+  hosts: linux
+  become: true
+  roles:
+    - chrony

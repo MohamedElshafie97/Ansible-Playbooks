@@ -1,0 +1,10 @@
+---
+timezone: Africa/Cairo
+
+ntp_servers:
+  - 0.pool.ntp.org
+  - 1.pool.ntp.org
+  - 2.pool.ntp.org
+
+# Where generated reports land on the control node
+report_dir: "{{ playbook_dir }}/../../reports"

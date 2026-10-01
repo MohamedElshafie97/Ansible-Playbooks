@@ -1,0 +1,12 @@
+{{ ansible_managed | comment }}
+[DEFAULT]
+bantime  = {{ fail2ban_bantime }}
+findtime = {{ fail2ban_findtime }}
+maxretry = {{ fail2ban_maxretry }}
+ignoreip = {{ fail2ban_ignoreip | join(' ') }}
+backend  = systemd
+banaction = {{ 'firewallcmd-rich-rules' if ansible_os_family == 'RedHat' else 'ufw' }}
+
+[sshd]
+enabled = true
+port    = {{ fail2ban_ssh_port }}

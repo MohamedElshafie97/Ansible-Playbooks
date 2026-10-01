@@ -1,0 +1,32 @@
+---
+- name: Install logrotate
+  ansible.builtin.package:
+    name: logrotate
+    state: present
+
+- name: Enable compression in the global config
+  ansible.builtin.lineinfile:
+    path: /etc/logrotate.conf
+    regexp: '^#?\s*compress\s*$'
+    line: compress
+  when: logrotate_compress_globally
+
+- name: Deploy per-application policies
+  ansible.builtin.template:
+    src: policy.j2
+    dest: "/etc/logrotate.d/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ logrotate_policies }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Dry-run every deployed policy
+  ansible.builtin.command: "logrotate --debug /etc/logrotate.d/{{ item.name }}"
+  loop: "{{ logrotate_policies }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: logrotate_dryrun
+  changed_when: false
+  failed_when: logrotate_dryrun.rc != 0 or 'error:' in logrotate_dryrun.stderr

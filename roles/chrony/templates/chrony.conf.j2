@@ -1,0 +1,16 @@
+{{ ansible_managed | comment }}
+
+{% for server in chrony_servers %}
+server {{ server }} iburst
+{% endfor %}
+
+driftfile /var/lib/chrony/drift
+makestep 1.0 3
+rtcsync
+keyfile /etc/chrony.keys
+leapsectz right/UTC
+logdir /var/log/chrony
+
+{% for net in chrony_allow_networks %}
+allow {{ net }}
+{% endfor %}

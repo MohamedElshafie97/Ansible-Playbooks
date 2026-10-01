@@ -1,0 +1,7 @@
+---
+chrony_timezone: "{{ timezone | default('UTC') }}"
+chrony_servers: "{{ ntp_servers | default(['0.pool.ntp.org', '1.pool.ntp.org']) }}"
+# Allow these networks to use this host as an NTP server (empty = client only)
+chrony_allow_networks: []
+# Max acceptable offset in seconds before the verify step fails
+chrony_max_offset: 0.5

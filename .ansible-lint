@@ -1,0 +1,10 @@
+---
+profile: production
+exclude_paths:
+  - .github/
+  - scripts/
+  - .facts_cache/
+skip_list:
+  - var-naming[no-role-prefix]
+  # Keep community.* names so the repo works on older collection versions too
+  - fqcn[canonical]

@@ -1,0 +1,8 @@
+---
+# Deploys logrotate policies defined in logrotate_policies (see role defaults).
+# Each policy is dry-run with `logrotate --debug` after deployment.
+- name: Log rotation policies
+  hosts: linux
+  become: true
+  roles:
+    - logrotate

@@ -1,0 +1,152 @@
+---
+# Backs up config files and (on db hosts) every MariaDB database, then
+# proves the backup is usable: gzip integrity test, SHA-256 manifest,
+# and a copy of the manifest pulled back to the control node.
+#
+#   ansible-playbook playbooks/linux/backup-verify.yml
+#   ansible-playbook playbooks/linux/backup-verify.yml --limit db -e backup_retention_days=14
+- name: Backup with verification
+  hosts: linux
+  become: true
+  vars:
+    backup_root: /backup
+    backup_retention_days: 7
+    backup_stamp: "{{ '%Y%m%d-%H%M%S' | strftime }}"
+    backup_dir: "{{ backup_root }}/{{ inventory_hostname }}/{{ backup_stamp }}"
+    # Hosts or groups can add their own with backup_extra_paths
+    backup_base_paths:
+      - /etc/ssh/sshd_config
+      - /etc/fstab
+      - /etc/hosts
+      - /etc/sysctl.d
+      - /etc/sudoers.d
+    backup_mariadb: "{{ 'db' in group_names }}"
+    backup_min_free_mb: 2048
+
+  tasks:
+    - name: Make sure the backup root exists
+      ansible.builtin.file:
+        path: "{{ backup_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Check there is room for the backup
+      ansible.builtin.shell: |
+        set -o pipefail
+        df -Pm {{ backup_root }} | awk 'NR==2 {print $4}'
+      args:
+        executable: /bin/bash
+      register: backup_free_mb
+      changed_when: false
+
+    - name: Abort if the backup filesystem is nearly full
+      ansible.builtin.assert:
+        that: backup_free_mb.stdout | int > backup_min_free_mb
+        fail_msg: "Only {{ backup_free_mb.stdout }} MB free under {{ backup_root }}"
+
+    - name: Create backup directory
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Find which config paths exist on this host
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ backup_base_paths + (backup_extra_paths | default([])) }}"
+      register: backup_paths_stat
+
+    - name: Archive configuration
+      community.general.archive:
+        path: "{{ backup_paths_stat.results | selectattr('stat.exists') | map(attribute='item') | list }}"
+        dest: "{{ backup_dir }}/config.tar.gz"
+        format: gz
+        mode: "0600"
+
+    - name: Dump MariaDB databases
+      when: backup_mariadb | bool
+      block:
+        - name: List databases
+          ansible.builtin.command: >-
+            mariadb -N -B -e "SELECT schema_name FROM information_schema.schemata
+            WHERE schema_name NOT IN ('information_schema','performance_schema','sys')"
+          register: backup_db_list
+          changed_when: false
+
+        - name: Dump each database (consistent, non-locking for InnoDB)
+          ansible.builtin.shell: |
+            set -o pipefail
+            mariadb-dump --single-transaction --routines --triggers --events \
+              --databases {{ item }} | gzip -c > {{ backup_dir }}/db_{{ item }}.sql.gz
+          args:
+            executable: /bin/bash
+            creates: "{{ backup_dir }}/db_{{ item }}.sql.gz"
+          loop: "{{ backup_db_list.stdout_lines }}"
+
+        - name: Confirm each dump finished (look for the completion footer)
+          ansible.builtin.shell: |
+            set -o pipefail
+            zcat {{ backup_dir }}/db_{{ item }}.sql.gz | tail -n 1 | grep -q 'Dump completed'
+          args:
+            executable: /bin/bash
+          loop: "{{ backup_db_list.stdout_lines }}"
+          changed_when: false
+
+    - name: Find files produced in this run
+      ansible.builtin.find:
+        paths: "{{ backup_dir }}"
+        patterns: "*.gz"
+      register: backup_files
+
+    - name: Test gzip integrity of every file
+      ansible.builtin.command: "gzip -t {{ item.path }}"
+      loop: "{{ backup_files.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      changed_when: false
+
+    - name: Write SHA-256 manifest
+      ansible.builtin.shell: |
+        set -o pipefail
+        cd {{ backup_dir }} && sha256sum *.gz > SHA256SUMS
+      args:
+        executable: /bin/bash
+        creates: "{{ backup_dir }}/SHA256SUMS"
+
+    - name: Re-check the manifest
+      ansible.builtin.command: sha256sum -c SHA256SUMS
+      args:
+        chdir: "{{ backup_dir }}"
+      changed_when: false
+
+    - name: Pull manifest back to the control node
+      ansible.builtin.fetch:
+        src: "{{ backup_dir }}/SHA256SUMS"
+        dest: "{{ report_dir }}/backups/{{ inventory_hostname }}/{{ backup_stamp }}.sha256"
+        flat: true
+
+    - name: Find backup runs older than retention
+      ansible.builtin.find:
+        paths: "{{ backup_root }}/{{ inventory_hostname }}"
+        file_type: directory
+        age: "{{ backup_retention_days }}d"
+      register: backup_expired
+
+    - name: Remove expired backup runs
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ backup_expired.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+
+    - name: Append to backup log
+      ansible.builtin.lineinfile:
+        path: "{{ backup_root }}/{{ inventory_hostname }}/backup.log"
+        line: "{{ backup_stamp }} OK files={{ backup_files.matched }} expired_removed={{ backup_expired.matched }}"
+        create: true
+        mode: "0600"

@@ -1,0 +1,87 @@
+---
+- name: Create service user
+  ansible.builtin.user:
+    name: "{{ node_exporter_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Check installed version
+  ansible.builtin.command: "{{ node_exporter_bin }} --version"
+  register: node_exporter_current
+  changed_when: false
+  failed_when: false
+
+- name: Download and install binary
+  when: node_exporter_version not in (node_exporter_current.stdout | default('') + node_exporter_current.stderr | default(''))
+  block:
+    - name: Download release archive
+      ansible.builtin.unarchive:
+        src: "{{ node_exporter_url }}"
+        dest: /tmp
+        remote_src: true
+
+    - name: Install binary
+      ansible.builtin.copy:
+        src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch }}/node_exporter"
+        dest: "{{ node_exporter_bin }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+      notify: Restart node_exporter
+
+- name: Create textfile collector directory
+  ansible.builtin.file:
+    path: "{{ node_exporter_textfile_dir }}"
+    state: directory
+    owner: "{{ node_exporter_user }}"
+    group: "{{ node_exporter_user }}"
+    mode: "0775"
+
+- name: Deploy systemd unit
+  ansible.builtin.template:
+    src: node_exporter.service.j2
+    dest: /etc/systemd/system/node_exporter.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart node_exporter
+
+- name: Enable and start node_exporter
+  ansible.builtin.systemd_service:
+    name: node_exporter
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Allow Prometheus to scrape (firewalld)
+  ansible.posix.firewalld:
+    rich_rule: >-
+      rule family="ipv4" source address="{{ node_exporter_allowed_source }}"
+      port port="9100" protocol="tcp" accept
+    permanent: true
+    immediate: true
+    state: enabled
+  when:
+    - ansible_os_family == "RedHat"
+    - node_exporter_allowed_source | length > 0
+
+- name: Allow Prometheus to scrape (ufw)
+  community.general.ufw:
+    rule: allow
+    port: "9100"
+    proto: tcp
+    src: "{{ node_exporter_allowed_source }}"
+  when:
+    - ansible_os_family == "Debian"
+    - node_exporter_allowed_source | length > 0
+
+- name: Confirm metrics endpoint answers
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:9100/metrics"
+    return_content: false
+  register: node_exporter_probe
+  retries: 5
+  delay: 3
+  until: node_exporter_probe.status == 200

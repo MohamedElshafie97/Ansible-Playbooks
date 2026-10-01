@@ -1,0 +1,8 @@
+*.retry
+.facts_cache/
+reports/*
+!reports/.gitkeep
+.vault_pass*
+*.swp
+.venv/
+__pycache__/
