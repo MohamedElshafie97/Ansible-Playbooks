@@ -1,0 +1,37 @@
+---
+# Audits local Administrators on every Windows host and flags anything
+# not on the approved list. Set win_admins_enforce=true to remove them.
+- name: Local Administrators audit
+  hosts: windows
+  vars:
+    win_admins_approved:
+      - Administrator
+      - Domain Admins
+      - ansible-svc
+    win_admins_enforce: false
+
+  tasks:
+    - name: List members of local Administrators
+      ansible.windows.win_shell: |
+        Get-LocalGroupMember -Group Administrators |
+          ForEach-Object { $_.Name.Substring($_.Name.LastIndexOf([char]92) + 1) } |
+          ConvertTo-Json -Compress
+      register: win_admins_raw
+      changed_when: false
+
+    - name: Work out unexpected members
+      ansible.builtin.set_fact:
+        win_admins_unexpected: "{{ ([win_admins_raw.stdout | from_json] | flatten) | difference(win_admins_approved) }}"
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "{{ 'Unexpected admins: ' ~ (win_admins_unexpected | join(', ')) if win_admins_unexpected else 'Clean' }}"
+
+    - name: Remove unexpected members
+      ansible.windows.win_group_membership:
+        name: Administrators
+        members: "{{ win_admins_unexpected }}"
+        state: absent
+      when:
+        - win_admins_enforce | bool
+        - win_admins_unexpected | length > 0

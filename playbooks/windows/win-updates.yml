@@ -1,0 +1,50 @@
+---
+# Windows Update in rolling batches with automatic reboot.
+#
+#   ansible-playbook playbooks/windows/win-updates.yml
+#   ansible-playbook playbooks/windows/win-updates.yml -e '{"win_update_categories": ["SecurityUpdates"]}'
+- name: Windows updates
+  hosts: windows
+  serial: "{{ patch_batch | default(1) }}"
+  max_fail_percentage: 0
+  vars:
+    win_update_categories:
+      - CriticalUpdates
+      - SecurityUpdates
+      - UpdateRollups
+      - DefinitionUpdates
+    win_update_reboot: true
+    win_update_reject: []
+
+  tasks:
+    - name: Check free space on C
+      ansible.windows.win_shell: |
+        [math]::Round((Get-PSDrive C).Free / 1GB, 1)
+      register: win_free_gb
+      changed_when: false
+
+    - name: Abort if C has less than 5 GB free
+      ansible.builtin.assert:
+        that: win_free_gb.stdout | trim | float > 5
+        fail_msg: "Only {{ win_free_gb.stdout | trim }} GB free on C:"
+
+    - name: Install updates
+      ansible.windows.win_updates:
+        category_names: "{{ win_update_categories }}"
+        reject_list: "{{ win_update_reject }}"
+        reboot: "{{ win_update_reboot }}"
+        reboot_timeout: 1800
+        log_path: C:\Windows\Temp\ansible-win-updates.log
+      register: win_update_result
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >-
+          installed={{ win_update_result.installed_update_count }}
+          failed={{ win_update_result.failed_update_count | default(0) }}
+          reboot_required={{ win_update_result.reboot_required }}
+
+    - name: Fail if any update failed
+      ansible.builtin.assert:
+        that: win_update_result.failed_update_count | default(0) == 0
+        fail_msg: "Some updates failed - see C:\\Windows\\Temp\\ansible-win-updates.log"

@@ -1,0 +1,53 @@
+---
+# Read-only Windows health report. Writes reports/windows-health-<date>.csv
+- name: Collect Windows health data
+  hosts: windows
+  tasks:
+    - name: Gather health data
+      ansible.windows.win_shell: |
+        $os   = Get-CimInstance Win32_OperatingSystem
+        $disk = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" |
+                ForEach-Object { "{0} {1}%" -f $_.DeviceID, [math]::Round((1 - $_.FreeSpace / $_.Size) * 100) }
+        $stopped = Get-CimInstance Win32_Service -Filter "StartMode='Auto' AND State<>'Running'" |
+                   Where-Object { $_.Name -notmatch '^(gupdate|edgeupdate|sppsvc|RemoteRegistry|MapsBroker|CDPSvc)' } |
+                   Select-Object -ExpandProperty Name
+        $pendingReboot = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') -or
+                         (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired')
+        $lastPatch = (Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 1).InstalledOn
+        [pscustomobject]@{
+          os            = $os.Caption
+          uptime_days   = [math]::Round(((Get-Date) - $os.LastBootUpTime).TotalDays, 1)
+          mem_used_pct  = [math]::Round((1 - $os.FreePhysicalMemory / $os.TotalVisibleMemorySize) * 100)
+          disks         = ($disk -join '; ')
+          stopped_auto  = ($stopped -join '; ')
+          pending_reboot = $pendingReboot
+          last_patch    = if ($lastPatch) { $lastPatch.ToString('yyyy-MM-dd') } else { 'unknown' }
+        } | ConvertTo-Json -Compress
+      register: win_health_raw
+      changed_when: false
+
+    - name: Parse
+      ansible.builtin.set_fact:
+        win_health: "{{ win_health_raw.stdout | from_json }}"
+
+- name: Write report
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Ensure report directory exists
+      ansible.builtin.file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Write CSV
+      ansible.builtin.copy:
+        dest: "{{ report_dir }}/windows-health-{{ '%Y-%m-%d' | strftime }}.csv"
+        mode: "0644"
+        content: |
+          host,os,uptime_days,mem_used_pct,disks,stopped_auto_services,pending_reboot,last_patch
+          {% for h in groups['windows'] if hostvars[h].win_health is defined %}
+          {% set w = hostvars[h].win_health %}
+          {{ h }},"{{ w.os }}",{{ w.uptime_days }},{{ w.mem_used_pct }},"{{ w.disks }}","{{ w.stopped_auto }}",{{ w.pending_reboot }},{{ w.last_patch }}
+          {% endfor %}
