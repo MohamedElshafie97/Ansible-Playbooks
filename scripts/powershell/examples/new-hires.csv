@@ -1,0 +1,3 @@
+FirstName,LastName,SamAccountName,Department,Title,OU,Groups
+Sara,Hassan,s.hassan,Finance,Accountant,"OU=Finance,OU=Users,DC=lab,DC=local",Finance-RW;VPN-Users
+Omar,Fathy,o.fathy,IT,Systems Administrator,"OU=IT,OU=Users,DC=lab,DC=local",IT-Admins;VPN-Users
