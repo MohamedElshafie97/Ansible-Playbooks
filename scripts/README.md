@@ -4,6 +4,8 @@ Standalone Bash and PowerShell scripts for the jobs that don't need a full Ansib
 
 ## Bash
 
+Details and examples: [bash/README.md](bash/README.md)
+
 | Script | What it does |
 |--------|--------------|
 | `server-health.sh` | One-screen snapshot: load, memory, disks, inodes, failed units, top processes, listening ports. Exits 1 on any warning so it doubles as a check. |
@@ -21,6 +23,8 @@ mariadb-backup.sh -d /backup/mariadb -r 14 -n backup@nas01:/mnt/pool/db/
 ```
 
 ## PowerShell
+
+Details and examples: [powershell/README.md](powershell/README.md)
 
 | Script | What it does |
 |--------|--------------|

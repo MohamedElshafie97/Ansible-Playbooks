@@ -32,6 +32,8 @@ Everything targets a mixed RHEL/Rocky + Ubuntu/Debian fleet with some Windows Se
 
 ## Playbooks
 
+Each folder has its own README with the details: [linux](playbooks/linux/README.md), [windows](playbooks/windows/README.md). Every role under `roles/` has one too.
+
 ### Linux
 
 | Playbook | Purpose |
