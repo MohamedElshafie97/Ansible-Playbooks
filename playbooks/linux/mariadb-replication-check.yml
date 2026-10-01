@@ -1,0 +1,49 @@
+---
+# Checks MariaDB replication health on every replica in the db group.
+# Fails a host if either replication thread is down or lag is above
+# mariadb_max_lag_seconds. Reads credentials from root's ~/.my.cnf.
+#
+#   ansible-playbook playbooks/linux/mariadb-replication-check.yml
+- name: MariaDB replication health
+  hosts: db
+  become: true
+  gather_facts: false
+  vars:
+    repl_max_lag: "{{ mariadb_max_lag_seconds | default(60) }}"
+
+  tasks:
+    - name: Skip hosts that are not replicas
+      ansible.builtin.meta: end_host
+      when: mariadb_role | default('replica') != 'replica'
+
+    - name: Read replica status
+      community.mysql.mysql_replication:
+        mode: getreplica
+        login_unix_socket: "{{ mariadb_socket | default(omit) }}"
+      register: repl
+
+    - name: Show key fields
+      ansible.builtin.debug:
+        msg:
+          source: "{{ repl.Master_Host | default('n/a') }}"
+          io_running: "{{ repl.Slave_IO_Running | default('n/a') }}"
+          sql_running: "{{ repl.Slave_SQL_Running | default('n/a') }}"
+          seconds_behind: "{{ repl.Seconds_Behind_Master | default('n/a') }}"
+          gtid_io_pos: "{{ repl.Gtid_IO_Pos | default('n/a') }}"
+          last_error: "{{ repl.Last_Error | default('') }}"
+
+    - name: Assert replication is healthy
+      ansible.builtin.assert:
+        that:
+          - repl.Is_Replica | default(repl.Is_Slave | default(false))
+          - repl.Slave_IO_Running == 'Yes'
+          - repl.Slave_SQL_Running == 'Yes'
+          - repl.Seconds_Behind_Master is not none
+          - repl.Seconds_Behind_Master | int <= repl_max_lag | int
+        fail_msg: >-
+          Replication problem on {{ inventory_hostname }}:
+          IO={{ repl.Slave_IO_Running | default('?') }}
+          SQL={{ repl.Slave_SQL_Running | default('?') }}
+          lag={{ repl.Seconds_Behind_Master | default('?') }}s
+          error="{{ repl.Last_Error | default('') }}"
+        success_msg: "{{ inventory_hostname }} in sync, {{ repl.Seconds_Behind_Master }}s behind"

@@ -1,0 +1,17 @@
+---
+# Full baseline for a fresh Linux server: packages, kernel params,
+# time sync, SSH hardening and fail2ban. Safe to re-run.
+#
+#   ansible-playbook playbooks/linux/site-baseline.yml --limit web01
+- name: Linux server baseline
+  hosts: linux
+  become: true
+  roles:
+    - role: common
+      tags: [common]
+    - role: chrony
+      tags: [time]
+    - role: ssh_hardening
+      tags: [ssh]
+    - role: fail2ban
+      tags: [fail2ban]

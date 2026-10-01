@@ -1,0 +1,96 @@
+---
+# Rolling OS patching. Hosts go one batch at a time; if any host in a
+# batch fails, the run stops before touching the next batch.
+#
+#   ansible-playbook playbooks/linux/patch-rolling.yml --limit web
+#   ansible-playbook playbooks/linux/patch-rolling.yml -e patch_security_only=true
+- name: Rolling OS patching
+  hosts: linux
+  become: true
+  serial: "{{ patch_batch | default(1) }}"
+  max_fail_percentage: 0
+  vars:
+    patch_security_only: false
+    patch_allow_reboot: true
+    patch_reboot_timeout: 900
+    patch_min_free_mb: 1024
+    # Services that must be running again after the reboot
+    patch_check_services: []
+
+  pre_tasks:
+    - name: Check free space on /
+      ansible.builtin.assert:
+        that:
+          - (ansible_mounts | selectattr('mount', 'equalto', '/') | first).size_available > patch_min_free_mb * 1048576
+        fail_msg: "Less than {{ patch_min_free_mb }} MB free on / - clean up before patching"
+
+    - name: Record running kernel
+      ansible.builtin.command: uname -r
+      register: patch_kernel_before
+      changed_when: false
+
+  tasks:
+    - name: Patch RHEL-family hosts  # noqa: package-latest  (patching is the point)
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+        security: "{{ patch_security_only }}"
+        update_cache: true
+      when: ansible_os_family == "RedHat"
+      register: patch_result_rh
+
+    - name: Patch Debian-family hosts
+      ansible.builtin.apt:
+        upgrade: dist
+        update_cache: true
+        cache_valid_time: 3600
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+      when: ansible_os_family == "Debian"
+      register: patch_result_deb
+
+    - name: Check if a reboot is required (RHEL)
+      ansible.builtin.command: needs-restarting -r
+      register: patch_needs_restart
+      changed_when: false
+      failed_when: patch_needs_restart.rc not in [0, 1]
+      when: ansible_os_family == "RedHat"
+
+    - name: Check if a reboot is required (Debian)
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: patch_reboot_flag
+      when: ansible_os_family == "Debian"
+
+    - name: Decide on reboot
+      ansible.builtin.set_fact:
+        patch_reboot_needed: >-
+          {{ (ansible_os_family == 'RedHat' and patch_needs_restart.rc | default(0) == 1)
+             or (ansible_os_family == 'Debian' and patch_reboot_flag.stat.exists | default(false)) }}
+
+    - name: Reboot
+      ansible.builtin.reboot:
+        reboot_timeout: "{{ patch_reboot_timeout }}"
+        msg: "Rebooting after patching (ansible)"
+      when:
+        - patch_reboot_needed | bool
+        - patch_allow_reboot | bool
+
+  post_tasks:
+    - name: Make sure required services came back
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: started
+      loop: "{{ patch_check_services }}"
+
+    - name: Read kernel after patching
+      ansible.builtin.command: uname -r
+      register: patch_kernel_after
+      changed_when: false
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >-
+          kernel {{ patch_kernel_before.stdout }} -> {{ patch_kernel_after.stdout }},
+          reboot needed: {{ patch_reboot_needed }},
+          rebooted: {{ (patch_reboot_needed | bool) and (patch_allow_reboot | bool) }}

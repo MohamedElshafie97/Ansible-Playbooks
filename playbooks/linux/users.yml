@@ -1,0 +1,66 @@
+---
+# Manages admin accounts from group_vars (admin_users / removed_users).
+# Users with sudo: true get a validated sudoers drop-in.
+- name: Admin user management
+  hosts: linux
+  become: true
+  tasks:
+    - name: Ensure SSH access groups exist
+      ansible.builtin.group:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ ssh_allow_groups | default([]) }}"
+
+    - name: Create or update admin users
+      ansible.builtin.user:
+        name: "{{ item.name }}"
+        comment: "{{ item.comment | default(omit) }}"
+        groups: "{{ item.groups | default([]) }}"
+        append: true
+        shell: /bin/bash
+        state: present
+      loop: "{{ admin_users | selectattr('state', 'equalto', 'present') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Install authorized keys (exclusive)
+      ansible.posix.authorized_key:
+        user: "{{ item.name }}"
+        key: "{{ item.pubkey }}"
+        exclusive: true
+      loop: "{{ admin_users | selectattr('state', 'equalto', 'present') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Grant sudo through a drop-in file
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/{{ item.name }}"
+        content: "{{ item.name }} ALL=(ALL) ALL\n"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: /usr/sbin/visudo -cf %s
+      loop: "{{ admin_users | selectattr('sudo', 'defined') | selectattr('sudo') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Lock accounts marked absent before removal
+      ansible.builtin.user:
+        name: "{{ item }}"
+        password_lock: true
+        shell: /usr/sbin/nologin
+      loop: "{{ removed_users | default([]) + (admin_users | selectattr('state', 'equalto', 'absent') | map(attribute='name') | list) }}"
+      failed_when: false
+
+    - name: Remove accounts and their sudoers files
+      ansible.builtin.user:
+        name: "{{ item }}"
+        state: absent
+        remove: true
+      loop: "{{ removed_users | default([]) + (admin_users | selectattr('state', 'equalto', 'absent') | map(attribute='name') | list) }}"
+
+    - name: Remove leftover sudoers drop-ins
+      ansible.builtin.file:
+        path: "/etc/sudoers.d/{{ item }}"
+        state: absent
+      loop: "{{ removed_users | default([]) + (admin_users | selectattr('state', 'equalto', 'absent') | map(attribute='name') | list) }}"

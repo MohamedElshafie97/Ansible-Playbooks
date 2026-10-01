@@ -1,0 +1,9 @@
+---
+# Installs Prometheus node_exporter as a hardened systemd service.
+#
+#   ansible-playbook playbooks/linux/node-exporter.yml -e node_exporter_allowed_source=10.10.10.31
+- name: Prometheus node_exporter
+  hosts: linux
+  become: true
+  roles:
+    - node_exporter

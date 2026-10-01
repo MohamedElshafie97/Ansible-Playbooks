@@ -1,0 +1,93 @@
+---
+# Frees disk space safely: package caches, old journal entries,
+# old kernels, and compressed logs past their retention.
+# Run with --check first to see what would be removed.
+- name: Disk cleanup
+  hosts: linux
+  become: true
+  vars:
+    cleanup_journal_keep: 2weeks
+    cleanup_old_logs_days: 30
+    cleanup_tmp_days: 10
+
+  tasks:
+    - name: Disk usage before
+      ansible.builtin.command: df -h /
+      register: cleanup_before
+      changed_when: false
+      check_mode: false
+
+    - name: Vacuum journal
+      ansible.builtin.command: "journalctl --vacuum-time={{ cleanup_journal_keep }}"
+      register: cleanup_journal
+      changed_when: "'freed 0B' not in cleanup_journal.stderr"
+
+    - name: Clean dnf cache and keep only 2 kernels (RHEL)
+      when: ansible_os_family == "RedHat"
+      block:
+        - name: Clean dnf cache
+          ansible.builtin.command: dnf clean all
+          changed_when: true
+
+        - name: Remove old kernels
+          ansible.builtin.shell: |
+            set -o pipefail
+            old=$(dnf repoquery --installonly --latest-limit=-2 -q)
+            if [ -n "$old" ]; then dnf -y remove $old && echo removed; fi
+          args:
+            executable: /bin/bash
+          register: cleanup_kernels
+          changed_when: "'removed' in cleanup_kernels.stdout"
+
+    - name: Clean apt cache and unused packages (Debian)
+      when: ansible_os_family == "Debian"
+      block:
+        - name: Autoremove and autoclean
+          ansible.builtin.apt:
+            autoremove: true
+            autoclean: true
+            purge: true
+
+    - name: Find rotated logs past retention
+      ansible.builtin.find:
+        paths: /var/log
+        patterns: ["*.gz", "*.[0-9]", "*.old"]
+        age: "{{ cleanup_old_logs_days }}d"
+        recurse: true
+      register: cleanup_logs
+
+    - name: Delete rotated logs past retention
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ cleanup_logs.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Find stale files in /tmp
+      ansible.builtin.find:
+        paths: /tmp
+        age: "{{ cleanup_tmp_days }}d"
+        recurse: true
+        hidden: false
+      register: cleanup_tmp
+
+    - name: Delete stale /tmp files
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ cleanup_tmp.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Disk usage after
+      ansible.builtin.command: df -h /
+      register: cleanup_after
+      changed_when: false
+      check_mode: false
+
+    - name: Before / after
+      ansible.builtin.debug:
+        msg:
+          - "{{ cleanup_before.stdout_lines[-1] }}"
+          - "{{ cleanup_after.stdout_lines[-1] }}"

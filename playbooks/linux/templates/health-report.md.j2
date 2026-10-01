@@ -1,0 +1,27 @@
+# Linux health report – {{ '%Y-%m-%d %H:%M' | strftime }}
+
+| Host | OS | Uptime (d) | Load (1/5/15) | Mem used | Updates | Disks over threshold | Failed units |
+|------|----|-----------:|---------------|---------:|--------:|----------------------|--------------|
+{% for h in groups['linux'] if hostvars[h].health is defined %}
+{% set s = hostvars[h].health %}
+| {{ h }} | {{ s.os }} | {{ s.uptime_days }} | {{ s.load }} | {{ s.mem_used_pct }}% | {{ s.pending_updates }} | {{ s.disks_over_threshold | join(', ') or '-' }} | {{ s.failed_units | join(', ') or '-' }} |
+{% endfor %}
+
+{% set ns = namespace(missing=[]) %}
+{% for h in groups['linux'] if hostvars[h].health is not defined %}
+{% set ns.missing = ns.missing + [h] %}
+{% endfor %}
+{% if ns.missing %}
+## No data (unreachable or failed)
+
+{% for h in ns.missing %}
+- {{ h }}
+{% endfor %}
+{% endif %}
+
+## Disk usage
+
+{% for h in groups['linux'] if hostvars[h].health is defined %}
+**{{ h }}**: {% for d in hostvars[h].health.disks %}`{{ d.mount }}` {{ d.pct }}%{{ ', ' if not loop.last }}{% endfor %}
+
+{% endfor %}

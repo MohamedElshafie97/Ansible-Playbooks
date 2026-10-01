@@ -1,0 +1,6 @@
+---
+- name: Fail2ban for SSH
+  hosts: linux
+  become: true
+  roles:
+    - fail2ban

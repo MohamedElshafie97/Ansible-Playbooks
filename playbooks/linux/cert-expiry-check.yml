@@ -1,0 +1,54 @@
+---
+# Checks TLS certificates on remote endpoints from the control node and
+# fails if any expire within cert_warn_days.
+#
+#   ansible-playbook playbooks/linux/cert-expiry-check.yml
+- name: TLS certificate expiry check
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    cert_warn_days: 30
+    cert_endpoints:
+      - host: example.com
+        port: 443
+      - host: github.com
+        port: 443
+
+  tasks:
+    - name: Fetch certificate info
+      community.crypto.get_certificate:
+        host: "{{ item.host }}"
+        port: "{{ item.port | default(443) }}"
+      loop: "{{ cert_endpoints }}"
+      loop_control:
+        label: "{{ item.host }}:{{ item.port | default(443) }}"
+      register: cert_info
+
+    - name: Calculate days left
+      ansible.builtin.set_fact:
+        cert_report: >-
+          {{ cert_report | default([]) + [{
+               'endpoint': item.item.host ~ ':' ~ (item.item.port | default(443)),
+               'days_left': ((item.not_after | to_datetime('%Y%m%d%H%M%SZ')) - now(utc=true).replace(tzinfo=None)).days,
+               'issuer': item.issuer.O | default(item.issuer.CN | default('?'))
+             }] }}
+      loop: "{{ cert_info.results }}"
+      loop_control:
+        label: "{{ item.item.host }}"
+
+    - name: Show results
+      ansible.builtin.debug:
+        msg: "{{ item.endpoint }} - {{ item.days_left }} days left ({{ item.issuer }})"
+      loop: "{{ cert_report }}"
+      loop_control:
+        label: "{{ item.endpoint }}"
+
+    - name: Fail on certificates close to expiry
+      ansible.builtin.assert:
+        that: item.days_left | int > cert_warn_days
+        fail_msg: "{{ item.endpoint }} expires in {{ item.days_left }} days"
+        quiet: true
+      loop: "{{ cert_report }}"
+      loop_control:
+        label: "{{ item.endpoint }}"

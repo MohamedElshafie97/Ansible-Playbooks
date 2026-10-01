@@ -1,0 +1,76 @@
+---
+# Host firewall with a default-deny inbound policy.
+# Ports come from firewall_allowed_tcp_ports / firewall_allowed_udp_ports.
+# SSH is always kept open so the run can't cut its own connection.
+- name: Host firewall
+  hosts: linux
+  become: true
+  vars:
+    firewall_ssh_port: "{{ ssh_port | default(22) }}"
+    firewall_tcp: "{{ firewall_allowed_tcp_ports | default([]) }}"
+    firewall_udp: "{{ firewall_allowed_udp_ports | default([]) }}"
+
+  tasks:
+    - name: Firewalld (RHEL family)
+      when: ansible_os_family == "RedHat"
+      block:
+        - name: Install firewalld
+          ansible.builtin.package:
+            name: firewalld
+            state: present
+
+        - name: Start firewalld
+          ansible.builtin.service:
+            name: firewalld
+            state: started
+            enabled: true
+
+        - name: Open TCP ports
+          ansible.posix.firewalld:
+            port: "{{ item }}/tcp"
+            permanent: true
+            immediate: true
+            state: enabled
+          loop: "{{ (firewall_tcp + [firewall_ssh_port]) | map('string') | unique }}"
+
+        - name: Open UDP ports
+          ansible.posix.firewalld:
+            port: "{{ item }}/udp"
+            permanent: true
+            immediate: true
+            state: enabled
+          loop: "{{ firewall_udp | map('string') | list }}"
+
+    - name: UFW (Debian family)
+      when: ansible_os_family == "Debian"
+      block:
+        - name: Install ufw
+          ansible.builtin.package:
+            name: ufw
+            state: present
+
+        - name: Allow SSH first
+          community.general.ufw:
+            rule: limit
+            port: "{{ firewall_ssh_port }}"
+            proto: tcp
+
+        - name: Open TCP ports
+          community.general.ufw:
+            rule: allow
+            port: "{{ item }}"
+            proto: tcp
+          loop: "{{ firewall_tcp | map('string') | unique }}"
+
+        - name: Open UDP ports
+          community.general.ufw:
+            rule: allow
+            port: "{{ item }}"
+            proto: udp
+          loop: "{{ firewall_udp | map('string') | list }}"
+
+        - name: Default deny inbound, enable
+          community.general.ufw:
+            state: enabled
+            direction: incoming
+            policy: deny

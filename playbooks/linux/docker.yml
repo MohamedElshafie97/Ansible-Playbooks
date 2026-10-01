@@ -1,0 +1,102 @@
+---
+# Installs Docker Engine from Docker's official repository (not the
+# distro package), with log rotation set in daemon.json so container
+# logs can't fill the disk.
+#
+#   ansible-playbook playbooks/linux/docker.yml --limit web01 -e '{"docker_users": ["mohamed"]}'
+- name: Docker Engine
+  hosts: linux
+  become: true
+  vars:
+    docker_users: []
+    docker_daemon_options:
+      log-driver: json-file
+      log-opts:
+        max-size: 50m
+        max-file: "3"
+      live-restore: true
+
+  tasks:
+    - name: Remove conflicting distro packages
+      ansible.builtin.package:
+        name:
+          - docker
+          - docker-engine
+          - docker.io
+          - podman-docker
+          - containerd
+          - runc
+        state: absent
+
+    - name: Add Docker repo (RHEL family)
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/centos/docker-ce.repo
+        dest: /etc/yum.repos.d/docker-ce.repo
+        mode: "0644"
+      when: ansible_os_family == "RedHat"
+
+    - name: Add Docker repo (Debian family)
+      when: ansible_os_family == "Debian"
+      block:
+        - name: Create keyrings directory
+          ansible.builtin.file:
+            path: /etc/apt/keyrings
+            state: directory
+            mode: "0755"
+
+        - name: Download Docker GPG key
+          ansible.builtin.get_url:
+            url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+            dest: /etc/apt/keyrings/docker.asc
+            mode: "0644"
+
+        - name: Add apt source
+          ansible.builtin.apt_repository:
+            repo: >-
+              deb [arch={{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }} signed-by=/etc/apt/keyrings/docker.asc]
+              https://download.docker.com/linux/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable
+            filename: docker
+            state: present
+
+    - name: Install Docker Engine and plugins
+      ansible.builtin.package:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+
+    - name: Configure daemon.json
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        content: "{{ docker_daemon_options | to_nice_json }}\n"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart docker
+
+    - name: Enable and start Docker
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Add users to the docker group
+      ansible.builtin.user:
+        name: "{{ item }}"
+        groups: docker
+        append: true
+      loop: "{{ docker_users }}"
+
+    - name: Smoke test
+      ansible.builtin.command: docker run --rm hello-world
+      register: docker_smoke
+      changed_when: false
+
+  handlers:
+    - name: Restart docker
+      ansible.builtin.service:
+        name: docker
+        state: restarted

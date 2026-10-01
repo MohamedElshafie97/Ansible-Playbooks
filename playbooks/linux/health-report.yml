@@ -1,0 +1,88 @@
+---
+# Read-only health report. Nothing on the targets is changed.
+# Produces reports/linux-health-<date>.md on the control node.
+#
+#   ansible-playbook playbooks/linux/health-report.yml
+- name: Collect health data
+  hosts: linux
+  become: true
+  vars:
+    health_disk_warn_pct: 80
+  tasks:
+    - name: Failed systemd units  # noqa: command-instead-of-module
+      ansible.builtin.command: systemctl list-units --state=failed --no-legend --plain
+      register: health_failed_units
+      changed_when: false
+      failed_when: false
+
+    - name: Load average and uptime
+      ansible.builtin.command: cat /proc/loadavg
+      register: health_loadavg
+      changed_when: false
+
+    - name: Pending updates (RHEL)
+      ansible.builtin.command: dnf -q check-update
+      register: health_updates_rh
+      changed_when: false
+      failed_when: health_updates_rh.rc not in [0, 100]
+      when: ansible_os_family == "RedHat"
+
+    - name: Pending updates (Debian)
+      ansible.builtin.shell: |
+        set -o pipefail
+        apt list --upgradable 2>/dev/null | grep -c upgradable || true
+      args:
+        executable: /bin/bash
+      register: health_updates_deb
+      changed_when: false
+      when: ansible_os_family == "Debian"
+
+    - name: Work out usage per real filesystem
+      ansible.builtin.set_fact:
+        health_disks: >-
+          {{ health_disks | default([]) + [{
+               'mount': item.mount,
+               'pct': ((item.size_total - item.size_available) * 100 / item.size_total) | round(0) | int
+             }] }}
+      loop: "{{ ansible_mounts | rejectattr('fstype', 'in', ['tmpfs', 'devtmpfs', 'squashfs', 'overlay']) | selectattr('size_total', 'gt', 0) | list }}"
+      loop_control:
+        label: "{{ item.mount }}"
+
+    - name: Build per-host summary
+      ansible.builtin.set_fact:
+        health:
+          os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+          kernel: "{{ ansible_kernel }}"
+          uptime_days: "{{ (ansible_uptime_seconds / 86400) | round(1) }}"
+          load: "{{ health_loadavg.stdout.split()[:3] | join(' ') }}"
+          cpus: "{{ ansible_processor_vcpus }}"
+          mem_used_pct: "{{ ((1 - ansible_memfree_mb / ansible_memtotal_mb) * 100) | round(0) | int }}"
+          swap_used_mb: "{{ ansible_swaptotal_mb - ansible_swapfree_mb }}"
+          disks: "{{ health_disks | default([]) }}"
+          disks_over_threshold: "{{ health_disks | default([]) | selectattr('pct', 'gt', health_disk_warn_pct) | map(attribute='mount') | list }}"
+          failed_units: "{{ health_failed_units.stdout_lines | default([]) | map('split') | map('first') | list }}"
+          pending_updates: >-
+            {{ (health_updates_rh.stdout_lines | default([]) | select | list | length)
+               if ansible_os_family == 'RedHat'
+               else (health_updates_deb.stdout | default('0') | int) }}
+
+- name: Write report
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Ensure report directory exists
+      ansible.builtin.file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Render markdown report
+      ansible.builtin.template:
+        src: templates/health-report.md.j2
+        dest: "{{ report_dir }}/linux-health-{{ '%Y-%m-%d' | strftime }}.md"
+        mode: "0644"
+
+    - name: Where to find it
+      ansible.builtin.debug:
+        msg: "Report written to {{ report_dir }}/linux-health-{{ '%Y-%m-%d' | strftime }}.md"
